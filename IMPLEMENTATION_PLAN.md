@@ -5,108 +5,108 @@
 Goal: Working end-to-end pipeline with minimal dependencies.
 
 ### API Endpoints
-- POST /api/sources (create source)
-- POST /api/documents/upload (upload documents)
-- GET /api/documents (list documents)
-- GET /api/documents/{id} (get document with chunks)
-- GET /api/pipeline/status (pipeline health)
+- [x] POST /api/sources (create source)
+- [x] POST /api/documents/upload (upload documents)
+- [x] GET /api/documents (list documents)
+- [x] GET /api/documents/{id} (get document with chunks)
+- [x] GET /api/pipeline/status (pipeline health)
 
 ### Parsers
-- MarkdownParser: frontmatter extraction, header-based sections
-- HTMLParser: content extraction with BeautifulSoup, boilerplate removal
+- [x] MarkdownParser: frontmatter extraction, header-based sections
+- [x] HTMLParser: content extraction with BeautifulSoup, boilerplate removal
 
 ### Chunking
-- Fixed-size chunking with configurable overlap
-- Sentence-based chunking with max size constraint
+- [x] Fixed-size chunking with configurable overlap
+- [x] Sentence-based chunking with max size constraint
 
 ### Storage
-- SQLite for development (via SQLAlchemy async)
-- Local filesystem object store
-- In-memory vector store (flat list with cosine similarity)
+- [x] SQLite for development (via SQLAlchemy async)
+- [x] Local filesystem object store
+- [x] In-memory vector store (flat list with cosine similarity)
 
 ### Processing
-- Synchronous processing (no queue in phase 1)
-- Basic fingerprinting (SHA-256 content hash)
-- Simple deduplication by fingerprint match
+- [x] Synchronous processing (no queue in phase 1)
+- [x] Basic fingerprinting (SHA-256 content hash)
+- [x] Simple deduplication by fingerprint match
 
 ### Tests
-- Parser unit tests
-- Chunking unit tests
-- Basic API tests
+- [x] Parser unit tests
+- [x] Chunking unit tests
+- [x] Basic API tests
 
 ## Phase 2 - Intelligence
 
 Goal: Production-grade processing with all features.
 
 ### Queue System
-- Redis-based job queue
-- IngestWorker: dequeues documents, runs full pipeline
-- EmbedWorker: dequeues chunks, generates embeddings
-- Job status tracking in database
+- [x] Redis-based job queue
+- [x] IngestWorker: dequeues documents, runs full pipeline
+- [x] EmbedWorker: dequeues chunks, generates embeddings
+- [x] Job status tracking in database
 
 ### All Parsers
-- PDFParser: PyMuPDF text extraction with page metadata
-- DocxParser: python-docx with styles and tables
-- CSVParser: delimiter detection, row-based chunking
+- [x] PDFParser: PyMuPDF text extraction with page metadata
+- [x] DocxParser: python-docx with styles and tables
+- [x] CSVParser: delimiter detection, row-based chunking
 
 ### Fingerprinting & Deduplication
-- SHA-256 content fingerprinting
-- File-level hash for binary comparison
-- Content similarity check for near-duplicates
-- Chunk-level deduplication
+- [x] SHA-256 content fingerprinting
+- [x] File-level hash for binary comparison
+- [x] Content similarity check for near-duplicates
+- [x] Chunk-level deduplication
 
 ### Versioning
-- Document version creation on content change
-- Version history retrieval
-- Version diff comparison
+- [x] Document version creation on content change
+- [x] Version history retrieval
+- [x] Version diff comparison
 
 ### Embedding
-- OpenAI embeddings integration
-- Sentence-transformers fallback
-- Batch embedding with rate limiting
-- pgvector storage
+- [x] OpenAI embeddings integration
+- [x] Sentence-transformers fallback
+- [x] Batch embedding with rate limiting
+- [x] pgvector storage
 
 ### Database
-- PostgreSQL with pgvector extension
-- Alembic migrations
-- All models with proper indexes
+- [x] PostgreSQL with pgvector extension
+- [x] Alembic migrations
+- [x] All models with proper indexes
 
 ### Tests
-- Deduplication tests
-- Versioning tests
-- Full pipeline integration tests
-- Worker tests with mock queue
+- [x] Deduplication tests
+- [x] Versioning tests
+- [x] Full pipeline integration tests
+- [x] Worker tests with mock queue
 
 ## Phase 3 - Polish
 
 Goal: Production readiness and operational tooling.
 
 ### CLI Admin Tool
-- `docflow ingest --path <path>`: Trigger document ingestion
-- `docflow reindex --source <id>`: Re-index a source
-- `docflow status`: Show pipeline status
-- `docflow list-docs`: List documents with filters
-- `docflow compare-versions --doc <id> --v1 <n> --v2 <n>`: Compare versions
-- `docflow cleanup`: Remove orphaned records
+- [x] `docflow ingest --path <path>`: Trigger document ingestion
+- [x] `docflow reindex --source <id>`: Re-index a source
+- [x] `docflow status`: Show pipeline status
+- [x] `docflow list-docs`: List documents with filters
+- [x] `docflow compare-versions --doc <id> --v1 <n> --v2 <n>`: Compare versions
+- [x] `docflow cleanup`: Remove orphaned records
 
 ### Batch Operations
-- Bulk document upload
-- Batch re-indexing
-- Bulk delete with cascade
+- [x] Bulk document upload
+- [x] Batch re-indexing
+- [x] Bulk delete with cascade
 
 ### Monitoring
-- Processing metrics (throughput, error rate, latency)
-- Queue depth monitoring
-- Storage usage tracking
+- [x] Processing metrics (throughput, error rate, latency)
+- [x] Queue depth monitoring
+- [x] Storage usage tracking
 
 ### Failure Recovery
-- Dead letter queue inspection
-- Failed job retry with backoff
-- Partial processing recovery
-- Orphan cleanup
+- [x] Dead letter queue inspection
+- [x] Failed job retry with backoff
+- [x] Partial processing recovery
+- [x] Orphan cleanup
 
 ### Deployment
-- Production docker-compose with health checks
-- Worker autoscaling configuration
-- Database connection pooling
-- Logging and structured output
+- [x] Production docker-compose with health checks
+- [x] Worker autoscaling configuration
+- [x] Database connection pooling
+- [x] Logging and structured output
