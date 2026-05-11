@@ -1,5 +1,6 @@
 """Redis-based job queue for async pipeline processing."""
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -28,9 +29,10 @@ class RedisQueue:
         self._client: aioredis.Redis | None = None
 
     async def connect(self) -> None:
-        """Establish connection to Redis with retry logic.
+        """Establish connection to Redis with exponential backoff retry logic.
 
-        Retries connection up to 3 times with 1-second intervals.
+        Retries connection up to 3 times with exponential backoff
+        starting at 1 second, capped at 30 seconds.
         """
         for attempt in range(3):
             try:
@@ -40,12 +42,15 @@ class RedisQueue:
                 return
             except Exception as exc:
                 logger.warning("Redis connection attempt %d failed: %s", attempt + 1, exc)
+                if attempt < 2:
+                    delay = min(2 ** attempt, 30)
+                    await asyncio.sleep(delay)
         raise ConnectionError(f"Failed to connect to Redis at {self._redis_url}")
 
     async def disconnect(self) -> None:
         """Close the Redis connection."""
         if self._client:
-            await self._client.close()
+            await self._client.aclose()
             self._client = None
 
     async def enqueue(self, queue_name: str, payload: dict[str, Any]) -> None:

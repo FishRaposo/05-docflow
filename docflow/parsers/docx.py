@@ -1,5 +1,7 @@
 """DOCX document parser using python-docx."""
 
+from typing import Any
+
 from docflow.parsers.base import BaseParser, ParsedDocument, Section
 
 
@@ -120,6 +122,3 @@ class DocxParser(BaseParser):
                 rows.append(" | ".join(cells))
             tables.append("\n".join(rows))
         return tables
-
-
-from typing import Any

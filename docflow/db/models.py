@@ -57,6 +57,7 @@ class Chunk(Base):
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     document_id: Mapped[UUID] = mapped_column(ForeignKey("documents.id"), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    content_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     start_char: Mapped[int] = mapped_column(Integer, nullable=False)
     end_char: Mapped[int] = mapped_column(Integer, nullable=False)

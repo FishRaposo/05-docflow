@@ -1,7 +1,13 @@
-from docflow.db.session import get_session, init_db, async_session, engine, Base
+"""Database session and engine configuration."""
 
-__all__ = ["get_session", "init_db", "async_session", "engine", "Base"]
-clarativeBase
+from collections.abc import AsyncGenerator
+
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+from sqlalchemy.orm import DeclarativeBase
 
 from docflow.config import settings
 
@@ -28,3 +34,6 @@ async def init_db() -> None:
     """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+
+__all__ = ["get_session", "init_db", "async_session", "engine", "Base"]

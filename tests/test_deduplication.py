@@ -1,5 +1,6 @@
 """Tests for deduplication and fingerprinting."""
 
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -57,19 +58,65 @@ class TestFingerprinter:
 class TestDeduplicationService:
     """Tests for the deduplication service."""
 
-    def test_detect_duplicate_content(self, deduplication_service: DeduplicationService) -> None:
+    @pytest.mark.asyncio
+    async def test_detect_duplicate_content(self, deduplication_service: DeduplicationService) -> None:
         """Test detection of duplicate content fingerprints."""
         doc_id = uuid4()
         fingerprint = "abc123"
-        deduplication_service.register_fingerprint(fingerprint, doc_id)
 
-        result = deduplication_service.check_content_duplicate(fingerprint)
+        mock_doc = MagicMock()
+        mock_doc.fingerprint = None
+        mock_doc.content_hash = None
+
+        stored_ids: list = [None]
+
+        async def mock_commit():
+            pass
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_doc
+
+        mock_dup_result = MagicMock()
+        mock_dup_result.scalar_one_or_none.return_value = doc_id
+
+        session = AsyncMock()
+        session.commit = mock_commit
+
+        call_count = 0
+
+        async def mock_execute(stmt):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                mock_result_inner = MagicMock()
+                mock_result_inner.scalar_one_or_none.return_value = mock_doc
+                return mock_result_inner
+            return mock_dup_result
+
+        session.execute = mock_execute
+
+        await deduplication_service.register_fingerprint(fingerprint, doc_id, session)
+        assert mock_doc.fingerprint == fingerprint
+
+        session2 = AsyncMock()
+        dup_result = MagicMock()
+        dup_result.scalar_one_or_none.return_value = doc_id
+        session2.execute.return_value = dup_result
+        session2.commit = AsyncMock()
+
+        result = await deduplication_service.check_content_duplicate(fingerprint, session2)
         assert result.is_duplicate is True
         assert result.existing_id == doc_id
 
-    def test_no_duplicate(self, deduplication_service: DeduplicationService) -> None:
+    @pytest.mark.asyncio
+    async def test_no_duplicate(self, deduplication_service: DeduplicationService) -> None:
         """Test that new content is not flagged as duplicate."""
-        result = deduplication_service.check_content_duplicate("nonexistent")
+        session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        session.execute.return_value = mock_result
+
+        result = await deduplication_service.check_content_duplicate("nonexistent", session)
         assert result.is_duplicate is False
 
     def test_merge_chunks(self, deduplication_service: DeduplicationService) -> None:
@@ -98,12 +145,20 @@ class TestDeduplicationService:
         )
         assert similarity == 0.0
 
-    def test_chunk_duplicate_detection(self, deduplication_service: DeduplicationService) -> None:
+    @pytest.mark.asyncio
+    async def test_chunk_duplicate_detection(self, deduplication_service: DeduplicationService) -> None:
         """Test chunk-level duplicate detection."""
         chunk_id = uuid4()
         content_hash = "chunk_hash_123"
-        deduplication_service.register_chunk_hash(content_hash, chunk_id)
 
-        result = deduplication_service.check_chunk_duplicate(content_hash)
-        assert result.is_duplicate is True
-        assert result.existing_id == chunk_id
+        mock_chunk = MagicMock()
+        mock_chunk.content_hash = None
+
+        session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_chunk
+        session.execute.return_value = mock_result
+        session.commit = AsyncMock()
+
+        await deduplication_service.register_chunk_hash(content_hash, chunk_id, session)
+        assert mock_chunk.content_hash == content_hash

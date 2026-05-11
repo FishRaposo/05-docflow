@@ -3,12 +3,16 @@
 from typing import Any
 from uuid import UUID
 
+import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from docflow.config import settings
 from docflow.db import get_session
 from docflow.db.models import Document, ProcessingJob, ProcessingJobResponse
+from docflow.queue.dlq import DeadLetterQueue
+from docflow.queue.redis_queue import RedisQueue
 
 router = APIRouter(prefix="/api/pipeline", tags=["pipeline"])
 
@@ -34,15 +38,20 @@ async def pipeline_status(
     error_docs = (
         await session.execute(select(func.count()).where(Document.status == "error"))
     ).scalar() or 0
-    pending_jobs = (
-        await session.execute(select(func.count()).where(ProcessingJob.status == "pending"))
-    ).scalar() or 0
+
+    queue = RedisQueue()
+    await queue.connect()
+    try:
+        ingest_depth = await queue.get_queue_length(f"{settings.QUEUE_NAME}:ingest")
+        embed_depth = await queue.get_queue_length(f"{settings.QUEUE_NAME}:embed")
+    finally:
+        await queue.disconnect()
 
     return {
         "status": "healthy",
         "queues": {
-            "ingest": {"pending": pending_jobs, "processing": 0},
-            "embed": {"pending": 0, "processing": 0},
+            "ingest": {"pending": ingest_depth, "processing": 0},
+            "embed": {"pending": embed_depth, "processing": 0},
         },
         "stats": {
             "documents_total": total_docs,
@@ -82,6 +91,55 @@ async def list_jobs(
         "jobs": [ProcessingJobResponse.model_validate(j) for j in jobs],
         "total": len(jobs),
     }
+
+
+@router.get("/dlq")
+async def list_dlq_entries(
+    limit: int = 50,
+) -> dict[str, Any]:
+    """List entries in the Dead Letter Queue.
+
+    Args:
+        limit: Maximum number of entries to return.
+
+    Returns:
+        List of DLQ entries with their metadata.
+    """
+    redis_client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+    try:
+        dlq = DeadLetterQueue(redis_client)
+        entries = await dlq.list_entries(limit)
+        return {"entries": entries, "total": len(entries)}
+    finally:
+        await redis_client.aclose()
+
+
+@router.post("/dlq/{dlq_id}/retry")
+async def retry_dlq_entry(
+    dlq_id: str,
+) -> dict[str, Any]:
+    """Retry a failed job from the Dead Letter Queue.
+
+    Re-enqueues the job to its original queue and removes it from the DLQ.
+
+    Args:
+        dlq_id: UUID of the DLQ entry to retry.
+
+    Returns:
+        Confirmation of the retry action.
+
+    Raises:
+        HTTPException: 404 if the DLQ entry is not found.
+    """
+    redis_client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+    try:
+        dlq = DeadLetterQueue(redis_client)
+        success = await dlq.retry(dlq_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="DLQ entry not found")
+        return {"status": "retried", "dlq_id": dlq_id}
+    finally:
+        await redis_client.aclose()
 
 
 @router.post("/retry/{job_id}", response_model=ProcessingJobResponse)

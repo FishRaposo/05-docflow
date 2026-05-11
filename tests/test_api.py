@@ -4,8 +4,33 @@ import pytest
 from fastapi.testclient import TestClient
 
 from docflow.main import app
+from docflow.config import settings
+from docflow.db import engine
 
 client = TestClient(app)
+
+
+def _db_available() -> bool:
+    """Check if the configured database is reachable."""
+    import asyncio
+
+    async def check() -> bool:
+        from sqlalchemy import text
+
+        try:
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+                return True
+        except Exception:
+            return False
+
+    return asyncio.run(check())
+
+
+db_required = pytest.mark.skipif(
+    not _db_available(),
+    reason="PostgreSQL database not available",
+)
 
 
 class TestHealthEndpoint:
@@ -16,8 +41,10 @@ class TestHealthEndpoint:
         response = client.get("/api/health")
         assert response.status_code == 200
         data = response.json()
-        assert data["status"] == "healthy"
+        assert data["status"] in ("healthy", "degraded")
         assert "version" in data
+        assert "database" in data
+        assert "redis" in data
 
     def test_root_endpoint(self) -> None:
         """Test that the root endpoint returns API info."""
@@ -28,6 +55,7 @@ class TestHealthEndpoint:
         assert data["status"] == "running"
 
 
+@db_required
 class TestSourceEndpoints:
     """Tests for source management endpoints."""
 
@@ -56,6 +84,7 @@ class TestSourceEndpoints:
         assert response.status_code == 404
 
 
+@db_required
 class TestDocumentEndpoints:
     """Tests for document management endpoints."""
 
@@ -83,6 +112,7 @@ class TestDocumentEndpoints:
         assert response.status_code == 404
 
 
+@db_required
 class TestPipelineEndpoints:
     """Tests for pipeline monitoring endpoints."""
 

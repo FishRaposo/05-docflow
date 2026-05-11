@@ -1,5 +1,9 @@
 """Integration tests for the full document processing pipeline."""
 
+from unittest.mock import AsyncMock, MagicMock
+from pathlib import Path
+from uuid import uuid4
+
 import pytest
 
 from docflow.parsers.markdown import MarkdownParser
@@ -10,6 +14,15 @@ from docflow.processing.deduplication import DeduplicationService
 from docflow.processing.fingerprint import Fingerprinter
 from docflow.processing.metadata import MetadataExtractor
 from docflow.processing.versioning import VersioningService
+
+
+def _make_session_for_versioning(doc_mock):
+    session = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = doc_mock
+    session.execute.return_value = mock_result
+    session.commit = AsyncMock()
+    return session
 
 
 class TestFullPipeline:
@@ -39,9 +52,15 @@ class TestFullPipeline:
         chunks = chunker.chunk_fixed(parsed.content)
         assert len(chunks) > 0
 
-        version = versioning_service.create_version(
-            md_file.stat().st_uid if hasattr(md_file.stat(), "st_uid") else 0,
+        doc_id = uuid4()
+        doc_mock = MagicMock()
+        doc_mock.metadata_ = {}
+        session = _make_session_for_versioning(doc_mock)
+
+        version = await versioning_service.create_version(
+            doc_id,
             {"fingerprint": fingerprint},
+            session,
         )
         assert version.version == 1
 
@@ -59,18 +78,35 @@ class TestFullPipeline:
         fingerprinter = Fingerprinter()
         dedup_service = DeduplicationService()
 
-        from uuid import uuid4
-
         doc_id = uuid4()
 
         parsed = await parser.parse(str(md_file))
         fingerprint = fingerprinter.compute_fingerprint(parsed.content)
 
-        result1 = dedup_service.check_content_duplicate(fingerprint)
-        assert result1.is_duplicate is False
-        dedup_service.register_fingerprint(fingerprint, doc_id)
+        session1 = AsyncMock()
+        mock_result1 = MagicMock()
+        mock_result1.scalar_one_or_none.return_value = None
+        session1.execute.return_value = mock_result1
 
-        result2 = dedup_service.check_content_duplicate(fingerprint)
+        result1 = await dedup_service.check_content_duplicate(fingerprint, session1)
+        assert result1.is_duplicate is False
+
+        mock_doc = MagicMock()
+        mock_doc.fingerprint = None
+        mock_doc.content_hash = None
+        session_reg = AsyncMock()
+        mock_reg_result = MagicMock()
+        mock_reg_result.scalar_one_or_none.return_value = mock_doc
+        session_reg.execute.return_value = mock_reg_result
+        session_reg.commit = AsyncMock()
+        await dedup_service.register_fingerprint(fingerprint, doc_id, session_reg)
+
+        session2 = AsyncMock()
+        mock_result2 = MagicMock()
+        mock_result2.scalar_one_or_none.return_value = doc_id
+        session2.execute.return_value = mock_result2
+
+        result2 = await dedup_service.check_content_duplicate(fingerprint, session2)
         assert result2.is_duplicate is True
         assert result2.existing_id == doc_id
 
@@ -89,23 +125,25 @@ class TestFullPipeline:
         md_file = tmp_path / "versioned.md"
         md_file.write_text(sample_markdown_content)
 
-        from uuid import uuid4
-
         doc_id = uuid4()
         fingerprinter = Fingerprinter()
         versioning_service = VersioningService()
 
+        doc_mock = MagicMock()
+        doc_mock.metadata_ = {}
+        session = _make_session_for_versioning(doc_mock)
+
         parsed = await MarkdownParser().parse(str(md_file))
         fp = fingerprinter.compute_fingerprint(parsed.content)
-        v1 = versioning_service.create_version(doc_id, {"fingerprint": fp})
+        v1 = await versioning_service.create_version(doc_id, {"fingerprint": fp}, session)
 
         md_file.write_text(sample_markdown_content + "\n\n# New Section\n\nNew content.")
         parsed2 = await MarkdownParser().parse(str(md_file))
         fp2 = fingerprinter.compute_fingerprint(parsed2.content)
-        v2 = versioning_service.create_version(doc_id, {"fingerprint": fp2})
+        v2 = await versioning_service.create_version(doc_id, {"fingerprint": fp2}, session)
 
         assert v1.version == 1
         assert v2.version == 2
 
-        diff = versioning_service.compare_versions(doc_id, 1, 2)
+        diff = await versioning_service.compare_versions(doc_id, 1, 2, session)
         assert diff.fingerprint_changed is True

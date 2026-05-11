@@ -20,6 +20,7 @@ class EmbeddingService:
         self._model_name = settings.EMBEDDING_MODEL
         self._dimensions = settings.EMBEDDING_DIMENSIONS
         self._client: Any = None
+        self._local_model: Any = None
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings for a list of texts.
@@ -97,7 +98,7 @@ class EmbeddingService:
     def _embed_local(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings using sentence-transformers locally.
 
-        Falls back to random vectors if sentence-transformers is not available.
+        Returns zero vectors if sentence-transformers is not available.
 
         Args:
             texts: List of text strings to embed.
@@ -108,11 +109,13 @@ class EmbeddingService:
         try:
             from sentence_transformers import SentenceTransformer
 
-            model = SentenceTransformer(self._model_name)
-            embeddings = model.encode(texts, show_progress_bar=False)
+            if self._local_model is None:
+                self._local_model = SentenceTransformer(self._model_name)
+
+            embeddings = self._local_model.encode(texts, show_progress_bar=False)
             return [emb.tolist() for emb in embeddings]
         except ImportError:
-            logger.warning("sentence-transformers not available, using placeholder embeddings")
-            import random
-
-            return [[random.random() for _ in range(self._dimensions)] for _ in texts]
+            logger.critical(
+                "NO EMBEDDING BACKEND AVAILABLE - using zero vectors (results will be meaningless)"
+            )
+            return [[0.0] * self._dimensions for _ in texts]

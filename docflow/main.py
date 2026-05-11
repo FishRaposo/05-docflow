@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from docflow.__init__ import __version__
 from docflow.api.router import api_router
-from docflow.db.session import init_db
+from docflow.db import init_db
 
 
 @asynccontextmanager

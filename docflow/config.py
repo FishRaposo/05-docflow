@@ -1,5 +1,8 @@
 """Application configuration with environment variable loading."""
 
+from typing_extensions import Self
+
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -30,6 +33,14 @@ class Settings(BaseSettings):
     MAX_FILE_SIZE_MB: int = 50
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+
+    @model_validator(mode="after")
+    def validate_chunk_config(self) -> Self:
+        if self.CHUNK_OVERLAP >= self.CHUNK_SIZE:
+            raise ValueError(
+                f"CHUNK_OVERLAP ({self.CHUNK_OVERLAP}) must be less than CHUNK_SIZE ({self.CHUNK_SIZE})"
+            )
+        return self
 
 
 settings = Settings()

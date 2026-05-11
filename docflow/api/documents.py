@@ -11,7 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from docflow.config import settings
 from docflow.db import get_session
-from docflow.db.models import Document, DocumentResponse
+from docflow.db.models import Chunk, Document, DocumentResponse
+from docflow.processing.versioning import VersioningService
+from docflow.queue.redis_queue import RedisQueue
+from docflow.storage.object_store import ObjectStore
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
@@ -26,48 +29,51 @@ async def upload_documents(
 ) -> dict[str, Any]:
     """Upload one or more documents for processing.
 
-    Files are stored in the configured storage path and queued for ingestion.
-
-    Args:
-        files: List of files to upload.
-        source_id: Optional parent source UUID.
-        session: Async database session.
-
-    Returns:
-        Dictionary with uploaded documents and any errors.
+    Files are stored via the ObjectStore and queued for ingestion.
     """
     uploaded: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
+    store = ObjectStore()
+    queue = RedisQueue()
+    await queue.connect()
 
-    for file in files:
-        ext = file.filename.rsplit(".", 1)[-1].lower() if file.filename and "." in file.filename else ""
-        if ext not in ALLOWED_EXTENSIONS:
-            errors.append({"filename": file.filename or "unknown", "error": f"Unsupported file type: {ext}"})
-            continue
+    try:
+        for file in files:
+            ext = file.filename.rsplit(".", 1)[-1].lower() if file.filename and "." in file.filename else ""
+            if ext not in ALLOWED_EXTENSIONS:
+                errors.append({"filename": file.filename or "unknown", "error": f"Unsupported file type: {ext}"})
+                continue
 
-        max_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
-        content = await file.read()
-        if len(content) > max_bytes:
-            errors.append({"filename": file.filename or "unknown", "error": "File exceeds size limit"})
-            continue
+            max_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
+            content = await file.read()
+            if len(content) > max_bytes:
+                errors.append({"filename": file.filename or "unknown", "error": "File exceeds size limit"})
+                continue
 
-        os.makedirs(settings.STORAGE_PATH, exist_ok=True)
-        stored_name = f"{uuid.uuid4().hex}.{ext}"
-        file_path = os.path.join(settings.STORAGE_PATH, stored_name)
-        with open(file_path, "wb") as f:
-            f.write(content)
+            stored_name = f"{uuid.uuid4().hex}.{ext}"
+            file_path = await store.save(stored_name, content)
 
-        doc = Document(
-            title=file.filename or stored_name,
-            file_path=file_path,
-            file_type=ext,
-            source_id=source_id,
-            status="pending",
-        )
-        session.add(doc)
-        uploaded.append({"id": str(doc.id), "title": doc.title, "status": "pending"})
+            doc = Document(
+                title=file.filename or stored_name,
+                file_path=file_path,
+                file_type=ext,
+                source_id=source_id,
+                status="pending",
+            )
+            session.add(doc)
+            await session.commit()
+            await session.refresh(doc)
 
-    await session.commit()
+            await queue.enqueue(
+                f"{settings.QUEUE_NAME}:ingest",
+                {"document_id": str(doc.id)},
+            )
+
+            uploaded.append({"id": str(doc.id), "title": doc.title, "status": "pending"})
+
+    finally:
+        await queue.disconnect()
+
     return {"uploaded": uploaded, "errors": errors}
 
 
@@ -80,19 +86,7 @@ async def list_documents(
     offset: int = 0,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """List documents with optional filters.
-
-    Args:
-        status: Filter by processing status.
-        file_type: Filter by file extension.
-        source_id: Filter by parent source.
-        limit: Maximum number of results.
-        offset: Number of results to skip.
-        session: Async database session.
-
-    Returns:
-        Paginated list of documents.
-    """
+    """List documents with optional filters."""
     query = select(Document)
     count_query = select(func.count()).select_from(Document)
 
@@ -124,24 +118,11 @@ async def get_document(
     document_id: UUID,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """Get a document with its chunk summary.
-
-    Args:
-        document_id: UUID of the document to retrieve.
-        session: Async database session.
-
-    Returns:
-        Document details with chunk count.
-
-    Raises:
-        HTTPException: 404 if document not found.
-    """
+    """Get a document with its chunk summary."""
     result = await session.execute(select(Document).where(Document.id == document_id))
     doc = result.scalar_one_or_none()
     if doc is None:
         raise HTTPException(status_code=404, detail="Document not found")
-
-    from docflow.db.models import Chunk
 
     chunk_count = (
         await session.execute(select(func.count()).where(Chunk.document_id == document_id))
@@ -156,15 +137,7 @@ async def delete_document(
     document_id: UUID,
     session: AsyncSession = Depends(get_session),
 ) -> None:
-    """Delete a document and its associated chunks.
-
-    Args:
-        document_id: UUID of the document to delete.
-        session: Async database session.
-
-    Raises:
-        HTTPException: 404 if document not found.
-    """
+    """Delete a document and its associated chunks."""
     result = await session.execute(select(Document).where(Document.id == document_id))
     doc = result.scalar_one_or_none()
     if doc is None:
@@ -178,20 +151,7 @@ async def reindex_document(
     document_id: UUID,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, str]:
-    """Trigger re-indexing of a document.
-
-    Re-runs the full ingestion pipeline on an existing document.
-
-    Args:
-        document_id: UUID of the document to re-index.
-        session: Async database session.
-
-    Returns:
-        Status message confirming re-index was triggered.
-
-    Raises:
-        HTTPException: 404 if document not found.
-    """
+    """Trigger re-indexing of a document."""
     result = await session.execute(select(Document).where(Document.id == document_id))
     doc = result.scalar_one_or_none()
     if doc is None:
@@ -199,6 +159,17 @@ async def reindex_document(
 
     doc.status = "pending"
     await session.commit()
+
+    queue = RedisQueue()
+    await queue.connect()
+    try:
+        await queue.enqueue(
+            f"{settings.QUEUE_NAME}:ingest",
+            {"document_id": str(document_id)},
+        )
+    finally:
+        await queue.disconnect()
+
     return {"status": "reindex_started", "document_id": str(document_id)}
 
 
@@ -207,25 +178,17 @@ async def get_document_versions(
     document_id: UUID,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """Get the version history of a document.
-
-    Args:
-        document_id: UUID of the document.
-        session: Async database session.
-
-    Returns:
-        List of document versions.
-
-    Raises:
-        HTTPException: 404 if document not found.
-    """
+    """Get the version history of a document."""
     result = await session.execute(select(Document).where(Document.id == document_id))
     doc = result.scalar_one_or_none()
     if doc is None:
         raise HTTPException(status_code=404, detail="Document not found")
 
+    versioning_service = VersioningService()
+    history = versioning_service.get_version_history(document_id, session)
+
     return {
         "document_id": str(document_id),
         "current_version": doc.version,
-        "versions": [{"version": doc.version, "fingerprint": doc.fingerprint}],
+        "versions": [v.model_dump() for v in history],
     }

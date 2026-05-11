@@ -88,9 +88,9 @@ class TestSemanticChunking:
     """Tests for semantic chunking strategy."""
 
     def test_semantic_chunking_placeholder(self, chunking_service: ChunkingService) -> None:
-        """Test semantic chunking produces results (falls back to sentence-based)."""
+        """Test section-size chunking produces results."""
         text = "Topic A is about cats. Cats are furry animals. Topic B is about dogs. Dogs are loyal companions."
-        chunks = chunking_service.chunk_by_semantic(text, threshold=0.7)
+        chunks = chunking_service.chunk_by_section_size(text, threshold=0.7)
 
         assert len(chunks) > 0
         full_content = " ".join(c.content for c in chunks)

@@ -21,7 +21,7 @@ class ChunkCandidate(BaseModel):
 class ChunkingService:
     """Service for splitting text into chunks using configurable strategies.
 
-    Supports fixed-size, sentence-based, semantic, and structural chunking.
+    Supports fixed-size, sentence-based, section-size, and structural chunking.
     """
 
     def __init__(
@@ -137,20 +137,20 @@ class ChunkingService:
 
         return chunks
 
-    def chunk_by_semantic(
+    def chunk_by_section_size(
         self,
         text: str,
         threshold: float = 0.7,
     ) -> list[ChunkCandidate]:
-        """Split text into semantically coherent chunks.
+        """Split text into chunks grouped by character count.
 
-        Groups consecutive sentences by semantic similarity. Requires
-        embedding support; falls back to sentence-based chunking if
-        embeddings are unavailable.
+        Groups consecutive sentences until chunk_size is reached, then
+        starts a new group. The threshold parameter is accepted for API
+        compatibility but does not affect the grouping logic.
 
         Args:
             text: Text to chunk.
-            threshold: Similarity threshold for grouping (0.0 to 1.0).
+            threshold: Ignored; accepted for API compatibility.
 
         Returns:
             List of ChunkCandidate objects.
@@ -173,7 +173,7 @@ class ChunkingService:
                         content=content,
                         start_char=pos,
                         end_char=pos + len(content),
-                        metadata={"strategy": "semantic", "threshold": threshold},
+                        metadata={"strategy": "section_size", "threshold": threshold},
                     )
                 )
                 pos += len(content) + 1
@@ -186,7 +186,7 @@ class ChunkingService:
                     content=content,
                     start_char=pos,
                     end_char=pos + len(content),
-                    metadata={"strategy": "semantic", "threshold": threshold},
+                    metadata={"strategy": "section_size", "threshold": threshold},
                 )
             )
 

@@ -1,5 +1,7 @@
 """PDF document parser using PyMuPDF."""
 
+from typing import Any
+
 from docflow.parsers.base import BaseParser, ParsedDocument, Section
 
 
@@ -92,6 +94,3 @@ class PDFParser(BaseParser):
             if stripped:
                 cleaned_lines.append(stripped)
         return "\n".join(cleaned_lines)
-
-
-from typing import Any

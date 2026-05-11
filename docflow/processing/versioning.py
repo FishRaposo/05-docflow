@@ -5,6 +5,10 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from docflow.db.models import Document
 
 
 class DocumentVersion(BaseModel):
@@ -18,6 +22,7 @@ class DocumentVersion(BaseModel):
     change_summary: str = Field(default="", description="Human-readable change description")
     chunks_added: int = Field(default=0, description="New chunks in this version")
     chunks_removed: int = Field(default=0, description="Removed chunks from previous")
+    chunks_total: int = Field(default=0, description="Total chunks at this version")
     created_at: datetime = Field(default_factory=datetime.now, description="Version timestamp")
 
 
@@ -37,29 +42,37 @@ class VersioningService:
     """Service for managing document versions and change tracking.
 
     Creates version snapshots when content changes and supports
-    version comparison for auditing.
+    version comparison for auditing. Stores version history in the
+    Document.metadata_ JSON field for persistence across restarts.
     """
 
-    def __init__(self) -> None:
-        """Initialize the versioning service with an in-memory version store."""
-        self._versions: dict[UUID, list[DocumentVersion]] = {}
-
-    def create_version(
+    async def create_version(
         self,
         document_id: UUID,
         changes: dict[str, Any],
+        session: AsyncSession,
     ) -> DocumentVersion:
         """Create a new version for a document.
 
         Args:
             document_id: UUID of the document.
             changes: Dictionary with change details (fingerprint, chunks info).
+            session: Database session.
 
         Returns:
             The newly created DocumentVersion.
         """
-        history = self._versions.get(document_id, [])
-        version_number = len(history) + 1
+        result = await session.execute(
+            select(Document).where(Document.id == document_id)
+        )
+        doc = result.scalar_one_or_none()
+        if doc is None:
+            raise ValueError(f"Document {document_id} not found")
+
+        metadata = doc.metadata_ or {}
+        versions: list[dict[str, Any]] = metadata.get("versions", [])
+
+        version_number = len(versions) + 1
         change_type = "created" if version_number == 1 else "updated"
 
         version = DocumentVersion(
@@ -69,37 +82,54 @@ class VersioningService:
             change_type=change_type,
             chunks_added=changes.get("chunks_added", 0),
             chunks_removed=changes.get("chunks_removed", 0),
+            chunks_total=changes.get("chunks_total", 0),
         )
 
-        if document_id not in self._versions:
-            self._versions[document_id] = []
-        self._versions[document_id].append(version)
+        versions.append(version.model_dump(mode="json"))
+        metadata["versions"] = versions
+        doc.metadata_ = metadata
+        doc.version = version_number
+        await session.commit()
 
         return version
 
-    def get_version_history(self, document_id: UUID) -> list[DocumentVersion]:
+    async def get_version_history(
+        self, document_id: UUID, session: AsyncSession
+    ) -> list[DocumentVersion]:
         """Retrieve the full version history for a document.
 
         Args:
             document_id: UUID of the document.
+            session: Database session.
 
         Returns:
             List of DocumentVersion objects in chronological order.
         """
-        return self._versions.get(document_id, [])
+        result = await session.execute(
+            select(Document).where(Document.id == document_id)
+        )
+        doc = result.scalar_one_or_none()
+        if doc is None or doc.metadata_ is None:
+            return []
 
-    def compare_versions(self, document_id: UUID, v1: int, v2: int) -> VersionDiff:
+        versions_data = doc.metadata_.get("versions", [])
+        return [DocumentVersion(**v) for v in versions_data]
+
+    async def compare_versions(
+        self, document_id: UUID, v1: int, v2: int, session: AsyncSession
+    ) -> VersionDiff:
         """Compare two versions of a document.
 
         Args:
             document_id: UUID of the document.
             v1: First version number.
             v2: Second version number.
+            session: Database session.
 
         Returns:
             VersionDiff describing the differences between versions.
         """
-        history = self._versions.get(document_id, [])
+        history = await self.get_version_history(document_id, session)
 
         version_a = next((v for v in history if v.version == v1), None)
         version_b = next((v for v in history if v.version == v2), None)
@@ -109,8 +139,10 @@ class VersioningService:
 
         fingerprint_changed = version_a.fingerprint != version_b.fingerprint
 
-        chunks_added = max(0, version_b.chunks_added - version_a.chunks_added)
-        chunks_removed = max(0, version_a.chunks_added - version_b.chunks_added)
+        delta = version_b.chunks_total - version_a.chunks_total
+        chunks_added = max(0, delta)
+        chunks_removed = max(0, -delta)
+        chunks_unchanged = min(version_a.chunks_total, version_b.chunks_total)
 
         summary = f"Version {v1} -> {v2}"
         if fingerprint_changed:
@@ -124,5 +156,6 @@ class VersioningService:
             fingerprint_changed=fingerprint_changed,
             chunks_added=chunks_added,
             chunks_removed=chunks_removed,
+            chunks_unchanged=chunks_unchanged,
             summary=summary,
         )
