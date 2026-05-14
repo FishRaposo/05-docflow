@@ -103,27 +103,62 @@ class TestHTMLParser:
 
 
 class TestPDFParser:
-    """Tests for the PDF document parser (placeholder)."""
+    """Tests for the PDF document parser."""
 
     @pytest.mark.asyncio
-    async def test_parse_pdf_placeholder(self) -> None:
-        """Test that PDF parser can be instantiated."""
+    async def test_parse_pdf_extracts_page_text_and_metadata(self, tmp_path: "Path") -> None:
+        """Test PDF parsing against a generated one-page document."""
+        pytest.importorskip("fitz")
+        import fitz
         from docflow.parsers.pdf import PDFParser
 
+        pdf_file = tmp_path / "sample.pdf"
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((72, 72), "Refund policy text from PDF")
+        doc.set_metadata({"title": "Sample PDF"})
+        doc.save(str(pdf_file))
+        doc.close()
+
         parser = PDFParser()
-        assert parser is not None
+        result = await parser.parse(str(pdf_file))
+
+        assert result.file_type == "pdf"
+        assert result.title == "Sample PDF"
+        assert result.metadata["page_count"] == 1
+        assert "Refund policy text" in result.content
+        assert result.sections[0].title == "Page 1"
 
 
 class TestDocxParser:
-    """Tests for the DOCX document parser (placeholder)."""
+    """Tests for the DOCX document parser."""
 
     @pytest.mark.asyncio
-    async def test_parse_docx_placeholder(self) -> None:
-        """Test that DOCX parser can be instantiated."""
+    async def test_parse_docx_extracts_headings_paragraphs_and_tables(self, tmp_path: "Path") -> None:
+        """Test DOCX parsing against a generated document."""
+        pytest.importorskip("docx")
+        from docx import Document
         from docflow.parsers.docx import DocxParser
 
+        docx_file = tmp_path / "sample.docx"
+        doc = Document()
+        doc.add_heading("Vendor Requirements", level=1)
+        doc.add_paragraph("Vendors must provide insurance certificates.")
+        table = doc.add_table(rows=2, cols=2)
+        table.cell(0, 0).text = "Control"
+        table.cell(0, 1).text = "Required"
+        table.cell(1, 0).text = "MFA"
+        table.cell(1, 1).text = "Yes"
+        doc.save(str(docx_file))
+
         parser = DocxParser()
-        assert parser is not None
+        result = await parser.parse(str(docx_file))
+
+        assert result.file_type == "docx"
+        assert result.title == "Vendor Requirements"
+        assert result.metadata["table_count"] == 1
+        assert "insurance certificates" in result.content
+        assert "MFA | Yes" in result.content
 
 
 class TestCSVParser:

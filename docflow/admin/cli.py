@@ -228,7 +228,7 @@ async def _compare(document: str, v1: int, v2: int) -> None:
     versioner = VersioningService()
     try:
         async with async_session() as session:
-            diff = versioner.compare_versions(uuid_mod.UUID(document), v1, v2, session)
+            diff = await versioner.compare_versions(uuid_mod.UUID(document), v1, v2, session)
             typer.echo(f"Comparing versions {v1} and {v2} for document {document}")
             typer.echo(f"  Fingerprint changed: {diff.fingerprint_changed}")
             typer.echo(f"  Chunks added: {diff.chunks_added}")
@@ -249,9 +249,9 @@ async def _cleanup(dry_run: bool) -> None:
         orphaned = orphaned_chunks.scalars().all()
 
         # Find old processing jobs (completed > 30 days ago)
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
 
-        cutoff = datetime.utcnow() - timedelta(days=30)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
         old_jobs = await session.execute(
             select(ProcessingJob).where(
                 ProcessingJob.status.in_(["completed", "error"]),

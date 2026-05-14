@@ -192,6 +192,80 @@ class ChunkingService:
 
         return chunks
 
+    def chunk_semantic(
+        self,
+        text: str,
+        threshold: float = 0.7,
+    ) -> list[ChunkCandidate]:
+        """Split text at coarse topic boundaries.
+
+        Uses sentence terms as a deterministic local substitute for embedding
+        similarity so tests and demos do not need an external model. A new
+        chunk starts when sentence term overlap drops below ``threshold`` after
+        the current chunk has useful content, or when the chunk size is reached.
+        """
+        sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s.strip()]
+        if not sentences:
+            return []
+
+        chunks: list[ChunkCandidate] = []
+        current: list[str] = []
+        current_terms: set[str] = set()
+        current_start = 0
+        cursor = 0
+
+        for sentence in sentences:
+            terms = self._terms(sentence)
+            current_text = " ".join(current)
+            overlap = len(current_terms & terms) / max(len(terms), 1)
+            should_split = (
+                bool(current)
+                and (
+                    len(current_text) + len(sentence) + 1 > self.chunk_size
+                    or (overlap < threshold and len(current_text) >= self.chunk_size * 0.35)
+                )
+            )
+
+            if should_split:
+                content = " ".join(current)
+                chunks.append(
+                    ChunkCandidate(
+                        content=content,
+                        start_char=current_start,
+                        end_char=current_start + len(content),
+                        metadata={"strategy": "semantic", "threshold": threshold},
+                    )
+                )
+                current_start = cursor
+                current = []
+                current_terms = set()
+
+            current.append(sentence)
+            current_terms.update(terms)
+            cursor += len(sentence) + 1
+
+        if current:
+            content = " ".join(current)
+            chunks.append(
+                ChunkCandidate(
+                    content=content,
+                    start_char=current_start,
+                    end_char=current_start + len(content),
+                    metadata={"strategy": "semantic", "threshold": threshold},
+                )
+            )
+
+        return chunks
+
+    @staticmethod
+    def _terms(text: str) -> set[str]:
+        stopwords = {"the", "and", "for", "with", "that", "this", "about", "are", "was", "were"}
+        return {
+            word
+            for word in re.findall(r"[a-zA-Z][a-zA-Z0-9_-]{2,}", text.lower())
+            if word not in stopwords
+        }
+
     def chunk_by_structure(self, sections: list[Section]) -> list[ChunkCandidate]:
         """Split document into chunks based on structural sections.
 

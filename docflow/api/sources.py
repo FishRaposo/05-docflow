@@ -1,6 +1,5 @@
 """Source management API endpoints."""
 
-import os
 from pathlib import Path
 from typing import Any
 from uuid import UUID

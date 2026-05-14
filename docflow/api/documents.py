@@ -1,6 +1,5 @@
 """Document management API endpoints."""
 
-import os
 import uuid
 from typing import Any
 from uuid import UUID
@@ -185,7 +184,7 @@ async def get_document_versions(
         raise HTTPException(status_code=404, detail="Document not found")
 
     versioning_service = VersioningService()
-    history = versioning_service.get_version_history(document_id, session)
+    history = await versioning_service.get_version_history(document_id, session)
 
     return {
         "document_id": str(document_id),

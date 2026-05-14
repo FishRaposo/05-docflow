@@ -87,15 +87,20 @@ class TestSentenceChunking:
 class TestSemanticChunking:
     """Tests for semantic chunking strategy."""
 
-    def test_semantic_chunking_placeholder(self, chunking_service: ChunkingService) -> None:
-        """Test section-size chunking produces results."""
-        text = "Topic A is about cats. Cats are furry animals. Topic B is about dogs. Dogs are loyal companions."
-        chunks = chunking_service.chunk_by_section_size(text, threshold=0.7)
+    def test_semantic_chunking_splits_topic_shifts(self) -> None:
+        """Test semantic chunking separates low-overlap topics."""
+        service = ChunkingService(chunk_size=120, chunk_overlap=0)
+        text = (
+            "Cats need litter boxes. Cats enjoy climbing trees. "
+            "Invoices require purchase order numbers. Invoices must include tax totals."
+        )
+        chunks = service.chunk_semantic(text, threshold=0.5)
 
-        assert len(chunks) > 0
+        assert len(chunks) >= 2
         full_content = " ".join(c.content for c in chunks)
         assert "cats" in full_content.lower()
-        assert "dogs" in full_content.lower()
+        assert "invoices" in full_content.lower()
+        assert chunks[0].metadata["strategy"] == "semantic"
 
 
 class TestStructureChunking:
